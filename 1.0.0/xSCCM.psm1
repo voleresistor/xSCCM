@@ -19,6 +19,8 @@ function Split-DriverSource
         [switch]$Verbose
     )
     
+    Import-Module PSAlphaFS
+    
     $DestFileCount = 0
     $SourceFileCount = 0
     
@@ -79,4 +81,37 @@ function Split-DriverSource
     PS C:\>
 #>
 
+#endregion
+#region Update-CMSiteName
+function Update-CMSiteName
+{
+    param
+    (
+        [string]$SiteName = 'HOU',
+        [string]$SiteServer = 'housccm03.dxpe.com',
+        [string]$NewSiteDesc
+    )
+    
+    $FullSite = Get-WmiObject -Class 'SMS_SCI_SiteDefinition' -Namespace "root/SMS/site_$SiteName" -ComputerName $SiteServer
+    
+    if (!($NewSiteDesc))
+    {
+        Write-Host "Current site description is - $($FullSite.SiteName)"
+        $NewSiteDesc = Read-Host -Prompt "Enter new description: "   
+    }
+    
+    $OldSiteDesc = $FullSite.SiteName
+    $FullSite.SiteName = $NewSiteDesc
+    $FullSite.Put()
+    
+    $CurrentSiteDesc = (Get-WmiObject -Class 'SMS_SCI_SiteDefinition' -Namespace "root/SMS/site_$SiteName" -ComputerName $SiteServer).SiteName
+    if ($CurrentSiteDesc -ne $NewSiteDesc)
+    {
+        Write-Host 'There was an error updating the site description.' -ForegroundColor Red
+    }
+    else
+    {
+        Write-Host "Site description successfully updated.`r`nOld: $OldSiteDesc`r`nNew: $NewSiteDesc"
+    }
+}
 #endregion
