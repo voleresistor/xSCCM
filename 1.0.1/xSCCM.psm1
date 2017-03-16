@@ -8,7 +8,7 @@
             Initial build
             Added Split-DriverSource
         03/16/17 - v 1.0.1
-            Added Get-CMDeviceCollectionMembership
+            Added Get-CMCollectionMembership
 #>
 
 #region Split-DriverSource 
@@ -119,8 +119,8 @@ function Update-CMSiteName
 }
 #endregion
 
-#region Get-CMDeviceCollectionMembership
-Function Get-CMDeviceCollectionMembership
+#region Get-CMCollectionMembership
+Function Get-CMCollectionMembership
 {
     <# 
             .SYNOPSIS 
