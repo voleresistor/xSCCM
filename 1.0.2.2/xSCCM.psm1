@@ -9,7 +9,7 @@
             Added Split-DriverSource
         03/16/17 - v 1.0.1
             Added Get-CMCollectionMembership
-        06/27/17 - v 1.0.2
+        06/27/17 - v 1.0.2.2
             Added Clear-CMCache
             Added Get-UpgradeReadiness
             Added Get-UpgradeHistory
@@ -213,15 +213,26 @@ Function Get-CMCollectionMembership
 #region Clear-CMCache
 function Clear-CMCache
 {
-    <#
-    ******************************************
-    Name: Clear-CMCache
-    Purpose: Remotely clear c:\windows\ccmcache on target computers
-    Author: Andrew Ogden
-    Email: andrew.ogden@dxpe.com
-
-    Scriptblock function borrowed from user 0byt3 in this Reddit thread: https://www.reddit.com/r/SCCM/comments/3m8uh9/script_sms_client_to_clear_cache_then_install/
+    <# 
+        .SYNOPSIS 
+            Clear CM and WU caches. Requires elevation to target local computer.
+        .DESCRIPTION
+            Clear CM cache and optionally the reset WU cache. This can help save disk space, force a computer to re-download an SCCM package or troubleshoot Windows Update errors. If the target is the local computer, elevation is required.
+        .PARAMETER  ComputerName 
+            Specify the computer or comma separated list of computers to clean up.
+        .PARAMETER  ResetWUCache 
+            Switch to enable cleanup of WU cache.
+        .EXAMPLE 
+            Clear-CMCache -ComputerName Computer1,Computer2
+            Clear-CMCache -ComputerName Computer1,Computer2 -ResetWUCache
+        .Notes 
+            Author : Andrew Ogden
+            Email: andrew.ogden@dxpe.com
+            Date: 06/26/2017
+            Updated: 06/27/2017
+            Functional code based on code provided by user 0byt3 in this Reddit thread: https://www.reddit.com/r/SCCM/comments/3m8uh9/script_sms_client_to_clear_cache_then_install/
     #>
+
     param
     (
         [array]$ComputerName,
@@ -370,14 +381,27 @@ PS C:\temp>
 #region Get-UpgradeReadiness
 function Get-UpgradeReadiness
 {
-    <#
-        Solution: OSD
-        Purpose: Determine eligibility prior to deploying Windows 10 upgrade
-        Version: 2.0 - Feb 07, 2017
-            - 2.0 replace custom object with PS5 class
-
-        Author: Andrew Ogden
+    <# 
+        .SYNOPSIS 
+            Determine if any obvious hardware or OS configurations are likely to prevent a successful upgrade to Windows 10.
+        .DESCRIPTION
+            Checks current OS, SKU, architecture, memory, and free disk space to determine eligibility for Windows 10 upgrade. Threshholds for eligibility are user modifiable.
+        .PARAMETER  ComputerName 
+            Specify the computer or comma separated list of computers to evaluate.
+        .PARAMETER  MinDisk 
+            Minimum free GB for upgrade eligibility. Entered as a float. Default: 14.5
+        .PARAMETER  MinMemory 
+            Minimum memory in GB for upgrade eligibility. Entered as a float. Default: 2.75
+        .PARAMETER  CsvOutFile 
+            Results can be saved in the specified file in CSV format. Useful when evaluating a large array of computers at once.
+        .EXAMPLE 
+            Get-UpgradeReadiness -ComputerName Computer1,Computer2
+            Get-UpgradeReadiness -ComputerName Computer1,Computer2 -CsvOutFile "C:\temp\Upgradecheck.csv"
+        .Notes 
+            Author : Andrew Ogden
             Email: andrew.ogden@dxpe.com
+            Date: 02/07/2017
+            Updated: 06/27/17
     #>
 
     #requires -Version 5.0
@@ -552,14 +576,20 @@ PS C:\temp>
 #region Get-UpgradeHistory
 function Get-UpgradeHistory
 {
-    <#
-        Solution: OSD
-        Purpose: Determine history of Windows upgrades
-        Version: 2.0 - Mar 29, 2017
-            - 2.0 replace custom object with PS5 class
-
-        Author: Andrew Ogden
+    <# 
+        .SYNOPSIS 
+            Get history report of all previous upgrades.
+        .DESCRIPTION
+            Gathers data about previous upgrades on the targeted system.
+        .PARAMETER  ComputerName 
+            Specify the computer or comma separated list of computers to evaluate.
+        .EXAMPLE 
+            Get-UpgradeHistory -ComputerName Computer1,Computer2
+        .Notes 
+            Author : Andrew Ogden
             Email: andrew.ogden@dxpe.com
+            Date: 03/29/2017
+            Updated: 06/27/17
     #>
 
     #requires -Version 5.0
