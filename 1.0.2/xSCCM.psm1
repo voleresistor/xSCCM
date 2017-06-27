@@ -11,6 +11,9 @@
             Added Get-CMCollectionMembership
         06/27/17 - v 1.0.2
             Added Clear-CMCache
+            Added Get-UpgradeReadiness
+            Added Get-UpgradeHistory
+            Update module manifest to require PS5 for use of Class in new functions
 #>
 
 #region Split-DriverSource 
@@ -359,6 +362,316 @@ PS C:\temp> Clear-CMCache -ComputerName dxpepc2314 -ResetWUCache
 12796 MB used by 1411 cache items on DXPEPC2314
 Resetting WU Cache on DXPEPC2314...
 Space saved on dxpepc2314: 15,452.77 MB
+
+PS C:\temp>
+#>
+#endregion
+
+#region Get-UpgradeReadiness
+function Get-UpgradeReadiness
+{
+    <#
+        Solution: OSD
+        Purpose: Determine eligibility prior to deploying Windows 10 upgrade
+        Version: 2.0 - Feb 07, 2017
+            - 2.0 replace custom object with PS5 class
+
+        Author: Andrew Ogden
+            Email: andrew.ogden@dxpe.com
+    #>
+
+    #requires -Version 5.0
+    Param
+    (
+        [array]$ComputerName = @('localhost'),
+        [float]$MinDisk = 14.5,
+        [float]$MinMemory = 2.75,
+        [string]$CsvOutFile
+    )
+
+    #Define our custom class
+    class UpgradeData
+    {
+        [string]
+        $ComputerName
+
+        [float]
+        $MemoryGB
+
+        [string]
+        $OSArchitecture
+
+        [string]
+        $OSEdition
+
+        [float]
+        $DiskFreeGB
+
+        [string]
+        $UserName
+
+        [string]
+        $OSVersion
+
+        [string]
+        $UpgradeOK
+    }
+
+    #Convert MinDisk and MinMemory to kB and B respectively
+    $MinDisk = $MinDisk * 1gb
+    $MinMemory = $MinMemory * 1kb * 1024
+
+    #An array to store class objects for each computer
+    $UpgradeReadiness = @()
+
+    #Cycle through our clients and gather data
+    foreach ($Client in $ComputerName)
+    {
+        #Create new instance of UpgradeData class and populate the computername
+        $ClientReadiness = [UpgradeData]::new()
+        $ClientReadiness.ComputerName = $Client
+
+        #Reset all variables
+        $ClientAvailable = $false
+        $ClientData = $null
+        $FormattedMemory = $null
+        $FormattedDisk = $null
+        $RawDisk = $null
+
+        #If the client is online, gather data and populate the object
+        if ((Test-NetConnection -ComputerName $Client -ErrorAction SilentlyContinue -WarningAction SilentlyContinue).PingSucceeded -eq 'True')
+        {
+            #Note that client was online
+            $ClientAvailable = $true
+
+            #Get data from WMI classes
+            $ClientData = Get-WmiObject -Class Win32_OperatingSystem -ComputerName $Client -ErrorAction SilentlyContinue | Select-Object -Property *
+            $RawDisk = Get-WmiObject -Class Win32_LogicalDisk -ComputerName $Client -ErrorAction SilentlyContinue | Where-Object -FilterScript {$_.DeviceId -eq 'C:'}
+            $User = (Get-WmiObject -Class win32_ComputerSystem -ComputerName $Client -ErrorAction SilentlyContinue).UserName
+
+            #Format memory and disk size numbers
+            $FormattedMemory = "{0:N1}" -f $($ClientData.TotalVisibleMemorySize / 1mb)
+            $FormattedDisk = "{0:N1}" -f $($RawDisk.FreeSpace /1gb)
+
+            #Populate disk and memory
+            $ClientReadiness.MemoryGB = $FormattedMemory
+            $ClientReadiness.DiskFreeGB = $FormattedDisk
+
+            #Get release level (Home/Pro/Ent)
+            if (($ClientData.Caption -match 'Enterprise') -eq 'True')
+            {
+                $ClientReadiness.OSEdition = 'Enterprise'
+            }
+            elseif (($ClientData.Caption -match 'Professional') -eq 'True')
+            {
+                $ClientReadiness.OSEdition = 'Professional'
+            }
+            elseif (($ClientData.Caption -match 'Home') -eq 'True')
+            {
+                $ClientReadiness.OSEdition = 'Home'
+            }
+
+            #Populate other values
+            $ClientReadiness.OSArchitecture = $ClientData.OSArchitecture
+            $ClientReadiness.OSVersion = $ClientData.Version
+            $ClientReadiness.UserName = $User
+        }
+
+        #Ugly 'if' chain to determine upgrade eligibility
+        if (!($ClientAvailable))
+        {
+            $ClientReadiness.UpgradeOK = 'Client Unavailable'
+        }
+        elseif ($ClientData.OSArchitecture -ne '64-bit')
+        {
+            $ClientReadiness.UpgradeOK = 'Arch Mismatch'
+        }
+        elseif ($MinDisk -gt $RawDisk.FreeSpace)
+        {
+            $ClientReadiness.UpgradeOK = 'Insuff Disk'
+        }
+        elseif (($MinMemory -gt $ClientData.TotalVisibleMemorySize))
+        {
+            $ClientReadiness.UpgradeOK = 'Insuff Memory'
+        }
+        else
+        {
+            $ClientReadiness.UpgradeOK = 'OK'
+        }
+
+        #Append this client's data to the total array
+        $UpgradeReadiness += $ClientReadiness
+    }
+
+    # Generate CSV file
+    if ($CsvOutFile)
+    {
+        # Backup old file if outfile already exists
+        if (Test-Path -Path $CsvOutFile)
+        {
+            Move-Item -Path $CsvOutFile -Destination "$CsvOutFile.old" -Force
+        }
+
+        # We set this so that data headers are only included once
+        $FirstItem = $true
+
+        # Generate the CSV file by looping through the array of computer objects
+        foreach ($Computer in $UpgradeReadiness)
+        {
+            $CsvData = ConvertTo-Csv -InputObject $Computer -NoTypeInformation -Delimiter ','
+            if ($FirstItem -eq $true)
+            {
+                Add-Content -Value $CsvData[0] -Path $CsvOutFile
+
+                # Disable inclusion of header data for further objects
+                $FirstItem = $false
+            }
+            Add-Content -Value $CsvData[1] -Path $CsvOutFile
+
+            Clear-Variable -Name CsvData
+        }
+    }
+
+    #Return collected data to console
+    Return $UpgradeReadiness
+}
+
+<#
+Example output:
+
+PS C:\temp> Get-UpgradeReadiness -ComputerName dxpepc2137 | ft
+
+ComputerName MemoryGB OSArchitecture OSEdition  DiskFreeGB UserName OSVersion  UpgradeOK
+------------ -------- -------------- ---------  ---------- -------- ---------  ---------
+dxpepc2137        3.8 64-bit         Enterprise      409.3          10.0.15063 OK
+
+PS C:\temp>
+#>
+#endregion
+
+#region Get-UpgradeHistory
+function Get-UpgradeHistory
+{
+    <#
+        Solution: OSD
+        Purpose: Determine history of Windows upgrades
+        Version: 2.0 - Mar 29, 2017
+            - 2.0 replace custom object with PS5 class
+
+        Author: Andrew Ogden
+            Email: andrew.ogden@dxpe.com
+    #>
+
+    #requires -Version 5.0
+    Param
+    (
+        [array]$ComputerName
+    )
+
+    # Store collected data
+    class UpgradeHistory
+    {
+        [string]$ComputerName
+
+        [string]$SourceOS
+
+        [string]$SourceEdition
+
+        [string]$SourceBuild
+
+        [string]$UpgradeDate
+    }
+
+    # Array of data objects
+    $UpgradeHistoryResults = @()
+
+    foreach ($c in $ComputerName)
+    {
+        # Connect remote reg and get data on upgrade keys
+        try
+        {
+            $RemoteReg = [Microsoft.win32.RegistryKey]::OpenRemoteBaseKey('LocalMachine',$c)
+            $SetupKey = $RemoteReg.OpenSubKey('SYSTEM\\Setup')
+            $UpgradeRecords = $SetupKey.GetSubKeyNames() | Where-Object -FilterScript {$_ -match 'Source OS'}
+        }
+        catch
+        {
+            # Create a record to record blank results
+            $ClientUpgradeHistory = [UpgradeHistory]::new()
+            $ClientUpgradeHistory.ComputerName = $c
+            $ClientUpgradeHistory.SourceOS = 'Offline'
+
+            # Add to array
+            $UpgradeHistoryResults += $ClientUpgradeHistory
+            Clear-Variable ClientUpgradeHistory
+
+            # Continue execution with next target
+            continue
+        }
+
+        # Record no data and continue if no records exist
+        if (!($UpgradeRecords))
+        {
+            # Create a record to record blank results
+            $ClientUpgradeHistory = [UpgradeHistory]::new()
+            $ClientUpgradeHistory.ComputerName = $c
+            $ClientUpgradeHistory.SourceOS = 'No upgrade data'
+
+            # Add to array
+            $UpgradeHistoryResults += $ClientUpgradeHistory
+            Clear-Variable ClientUpgradeHistory
+
+            # Continue execution with next target
+            $RemoteReg.Close()
+            continue
+        }
+
+        # Process all present upgrade keys
+        foreach ($Record in $UpgradeRecords)
+        {
+            # Instantiate class and open upgrade key
+            $ClientUpgradeHistory = [UpgradeHistory]::new()
+            $CurrentRecord = $RemoteReg.OpenSubKey("SYSTEM\\Setup\\$Record")
+
+            # Client name
+            $ClientUpgradeHistory.ComputerName = $c
+
+            # Upgrade date
+            $Record -match '[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}' | Out-Null
+            $ClientUpgradeHistory.UpgradeDate = $Matches[0]
+
+            # Get source OS Name
+            $ClientUpgradeHistory.SourceOS = $CurrentRecord.GetValue('ProductName')
+
+            # Get source edition
+            $ClientUpgradeHistory.SourceEdition = $CurrentRecord.GetValue('EditionID')
+
+            # Get source build
+            $ClientUpgradeHistory.SourceBuild = $CurrentRecord.GetValue('CurrentBuild')
+
+            # Add collected data to final array
+            $UpgradeHistoryResults += $ClientUpgradeHistory
+
+            # Clear variables used in loop
+            Clear-Variable ClientUpgradeHistory
+        }
+
+        Clear-Variable UpgradeRecords
+        $RemoteReg.Close()
+    }
+
+    return $UpgradeHistoryResults
+}
+<#
+Example output:
+
+PS C:\temp> Get-UpgradeHistory -ComputerName dxpepc2137
+
+ComputerName  : dxpepc2137
+SourceOS      : Windows 7 Enterprise
+SourceEdition : Enterprise
+SourceBuild   : 7601
+UpgradeDate   : 6/22/2017
 
 PS C:\temp>
 #>
